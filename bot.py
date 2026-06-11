@@ -24,14 +24,15 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── Config ────────────────────────────────────────────────────────────────────
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8947267795:AAFYWixbOYkQEQtx8BsboCQvlugIXunhLbY")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "8710131503:AAF6uFxN_cAsB3QH4vGFALveYCdsyKnO7Dk")
 RPC_URL     = os.getenv("RPC_URL", "https://api.mainnet-beta.solana.com")
+BOT_USERNAME = os.getenv("BOT_USERNAME")
 
 ENCRYPT_KEY = os.getenv("ENCRYPT_KEY") or Fernet.generate_key()
 fernet      = Fernet(ENCRYPT_KEY)
 
 # Admin user IDs — find yours by messaging @userinfobot on Telegram
-ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "7971878131,8788509984").split(",") if x.strip()]
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "7971878131,8755830256").split(",") if x.strip()]
 
 # In-memory user store { user_id: { "keypair_enc": bytes, "pubkey": str } }
 # Replace with a proper encrypted DB in production
@@ -136,6 +137,30 @@ def _split_message(text: str, limit: int = EXPORT_MESSAGE_LIMIT) -> list[str]:
 
     return [chunk for chunk in chunks if chunk]
 
+async def ensure_bot_username(ctx: ContextTypes.DEFAULT_TYPE) -> str | None:
+    global BOT_USERNAME
+    cached_username = ctx.application.bot_data.get("bot_username")
+    if isinstance(cached_username, str) and cached_username:
+        BOT_USERNAME = cached_username
+        return BOT_USERNAME
+
+    bot_username = ctx.bot.username
+    if not bot_username:
+        try:
+            bot_username = (await ctx.bot.get_me()).username
+        except Exception:
+            bot_username = None
+
+    if bot_username:
+        BOT_USERNAME = bot_username
+        ctx.application.bot_data["bot_username"] = bot_username
+        return BOT_USERNAME
+
+    if BOT_USERNAME:
+        return BOT_USERNAME
+
+    return None
+
 async def _delete_message_job(context: ContextTypes.DEFAULT_TYPE):
     chat_id, message_id = context.job.data
     try:
@@ -196,26 +221,29 @@ async def jupiter_swap(quote: dict, user_pubkey: str) -> dict | None:
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 def main_menu_keyboard():
-    # Layout mirrors the provided reference: two prominent single-action rows,
-    # then grouped utility rows with the widest actions on top.
+    # Layout mirrors the provided reference: a 3-column top row, paired feature
+    # rows, and a footer row with settings/refresh/support.
+    add_to_group_button = InlineKeyboardButton("👥 Add to Group", callback_data="bridge")
+    if BOT_USERNAME:
+        add_to_group_button = InlineKeyboardButton(
+            "👥 Add to Group",
+            url=f"https://t.me/{BOT_USERNAME}?startgroup=true",
+        )
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🚀 Copy Trade", callback_data="copy_trade")],
-        [InlineKeyboardButton("AFK Auto Trade", callback_data="afk_mode")],
-        [InlineKeyboardButton("📈 Market", callback_data="markets"),
-         InlineKeyboardButton("Smart Market ↗", callback_data="positions")],
-        [InlineKeyboardButton("💳Deposit & Wallet", callback_data="wallets"),
-         InlineKeyboardButton("🏦 Positions", callback_data="portfolio")],
-        [InlineKeyboardButton("💵 Smart Money ↗", callback_data="recovery")],
-        [InlineKeyboardButton("Address ↗", callback_data="bridge"),
-         InlineKeyboardButton("Signal ↗", callback_data="limit_orders"),
-         InlineKeyboardButton("👤User", callback_data="portfolio_user")],
-        [InlineKeyboardButton("Competition 🏆", callback_data="competition"),
-         InlineKeyboardButton("Notifications", callback_data="quick_start")],
-        [InlineKeyboardButton("English 🇺🇳", callback_data="language_menu"),
-         InlineKeyboardButton("💰 Referrals", callback_data="referral")],
-        [InlineKeyboardButton("Settings", callback_data="settings"),
-         InlineKeyboardButton("🆘Help", callback_data="help"),
-         InlineKeyboardButton("↻ Refresh", callback_data="refresh")],
+        [InlineKeyboardButton("📊 Portfolio", callback_data="portfolio"),
+         InlineKeyboardButton("📋 Orders", callback_data="limit_orders"),
+         InlineKeyboardButton("💰 Wallet", callback_data="wallets")],
+        [InlineKeyboardButton("🔎 Browse Markets", callback_data="positions"),
+         InlineKeyboardButton("🔔 Alerts", callback_data="quick_start")],
+        [InlineKeyboardButton("🚀 Auto Trader", callback_data="afk_mode"),
+         InlineKeyboardButton("🤖 Copy Trading", callback_data="copy_trade")],
+        [InlineKeyboardButton("⚡ Presets", callback_data="presales"),
+         InlineKeyboardButton("🛡️ Stop Loss", callback_data="tpsl_orders")],
+        [add_to_group_button,
+         InlineKeyboardButton("🤝 Referral Hub", callback_data="referral")],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="settings"),
+         InlineKeyboardButton("🔄 Refresh", callback_data="refresh"),
+         InlineKeyboardButton("🛟 Support", callback_data="help")],
     ])
 
 def import_prompt_keyboard(origin: str):
@@ -231,15 +259,13 @@ def back_to_menu_keyboard():
 
 def positions_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🏛️ Politics",   callback_data="market_politics"),
-         InlineKeyboardButton("🏅 Sports",      callback_data="market_sports")],
-        [InlineKeyboardButton("🪙 Crypto",      callback_data="market_crypto"),
-         InlineKeyboardButton("🦅 Trump",       callback_data="market_trump")],
-        [InlineKeyboardButton("💹 Finance",     callback_data="market_finance"),
-         InlineKeyboardButton("🌎 Geopolitics", callback_data="market_geopolitics")],
-        [InlineKeyboardButton("📊 Volume",      callback_data="market_volume"),
-         InlineKeyboardButton("🔥 Trending",    callback_data="market_trending")],
-        [InlineKeyboardButton("🏠 Main Menu",   callback_data="positions_homepage")],
+        [InlineKeyboardButton("📊 Volume", callback_data="market_volume"),
+         InlineKeyboardButton("📁 Category", callback_data="market_category")],
+        [InlineKeyboardButton("🔥 Trending", callback_data="market_trending"),
+         InlineKeyboardButton("✨ New", callback_data="market_new")],
+        [InlineKeyboardButton("🎰 Up or Down", callback_data="market_up_down")],
+        [InlineKeyboardButton("🔴 Live", callback_data="market_live")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="positions_homepage")],
     ])
 
 def wallet_settings_keyboard():
@@ -421,30 +447,26 @@ def wallet_settings_keyboard(language: str = "en"):
     ])
 
 MARKET_CATEGORY_LABELS = {
+    "market_volume": "Volume",
+    "market_category": "Category",
+    "market_trending": "Trending",
+    "market_new": "New",
+    "market_up_down": "Up or Down",
+    "market_live": "Live",
     "market_politics": "Politics",
     "market_sports": "Sports",
     "market_crypto": "Crypto",
     "market_trump": "Trump",
     "market_finance": "Finance",
     "market_geopolitics": "Geopolitics",
-    "market_volume": "Volume",
-    "market_trending": "Trending",
 }
 
 def _markets_text(selected_category: str | None = None) -> str:
-    selected_line = (
-        f"\n\nSelected category: *{selected_category}*"
-        if selected_category
-        else ""
-    )
     return (
-        "🔷 *PolyGun*\n\n"
-        "*ALL MARKETS*\n\n"
-        "Explore every live prediction market across all categories in one place.\n\n"
-        "🔎 *Market Search - Choose a filter*\n\n"
-        "Choose a category below or type in a custom search keywords (e.g. "
-        "\"bitcoin\", \"trump\", \"earnings\")."
-        f"{selected_line}"
+        "🔎 Market Search\n\n"
+        "Type any keyword to search (e.g. \"bitcoin\",\n"
+        "\"trump\")\n\n"
+        "Or browse by:"
     )
 
 def _wallet_settings_text() -> str:
@@ -458,20 +480,25 @@ def _wallet_settings_text() -> str:
 
 def _home_screen_text() -> str:
     return (
-        "🚀 Lightning Copy Trade With 0-Block(0s) Latency on Polymarket\n\n"
-        "Your Polymarket Balance: $0\n\n"
-        "📥 Import wallet with at least 100 USDC / USDT (Start with 1k so you can match returns) on Polygon, OP, Base, Ethereum, BSC and Arbitrum\n\n"
-        "Other deposit options: /wallet\n"
-        "PolyCop is gas free, no need to deposit POL\n\n"
-        "• /copytrade - The fastest copy speed, limit order copy, TP/SL\n"
-        "• /positions - View Positions\n"
-        "• Search Markets - Enter market name in the bot\n"
-        "• AI Analysis - Enter address in the bot"
+        "Welcome to PolyBot\n\n"
+        "The fastest and most secure bot for\n"
+        "trading on Polymarket\n\n"
+        "📊 Positions Value: $0.00\n"
+        "💰 Tradable Balance: $0.00\n"
+        "🔒 Open Limit Orders: $0.00\n"
+        "💼 Net Worth: $0.00\n\n"
+        "Go to Wallet to make a deposit"
+    )
+
+async def _show_main_menu(query):
+    await query.edit_message_text(
+        _home_screen_text(),
+        reply_markup=main_menu_keyboard(),
     )
 
 def _help_text() -> str:
     return (
-        "📚 Help\n\n"
+        "🆘 Support\n\n"
         "Use the menu to navigate between markets, wallet tools, and settings.\n"
         "Import your wallet when prompted.\n\n"
         "If the bot is slow, contact support."
@@ -479,9 +506,30 @@ def _help_text() -> str:
 
 def help_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Recovery",     callback_data="help_recovery")],
-        [InlineKeyboardButton("Create Ticket", callback_data="help_create_ticket")],
+        [InlineKeyboardButton("Recovery",     callback_data="help_recovery"),
+         InlineKeyboardButton("Create Ticket", callback_data="help_create_ticket")],
+        [InlineKeyboardButton("◀️ Back",      callback_data="back_to_menu")],
     ])
+
+def alerts_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Prev", callback_data="alerts_prev"),
+         InlineKeyboardButton("Page 1/1", callback_data="alerts_page"),
+         InlineKeyboardButton("Next ➡️", callback_data="alerts_next")],
+        [InlineKeyboardButton("➕ Add Market Alert", callback_data="alerts_add_market")],
+        [InlineKeyboardButton("👀 Add Wallet Watcher", callback_data="alerts_add_wallet")],
+        [InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu"),
+         InlineKeyboardButton("🏠 Main Menu", callback_data="alerts_main_menu")],
+    ])
+
+def _alerts_text() -> str:
+    return (
+        "🔔 Alerts\n\n"
+        "You have no active alerts.\n"
+        "You are not tracking any wallets yet.\n\n"
+        "Add a market alert from your open positions or paste a Polymarket market link.\n"
+        "Track a trader wallet to get activity alerts."
+    )
 
 def recovery_keyboard():
     return InlineKeyboardMarkup([
@@ -515,60 +563,53 @@ def _lp_sniper_text() -> str:
 
 def copy_trade_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("➕ Create Copy Trade", callback_data="copy_trade_create")],
-        [InlineKeyboardButton("➕ Use Sub-Wallet Create Copy", callback_data="copy_trade_subwallet")],
-        [InlineKeyboardButton("🔬 Run Copy BackTesting ↗", callback_data="copy_trade_backtesting")],
-        [InlineKeyboardButton("Default copy trading settings", callback_data="copy_trade_defaults")],
-        [InlineKeyboardButton("🔔 Failed Alerts On", callback_data="copy_trade_failed_alerts"),
-         InlineKeyboardButton("▽ Stop All Copy Tasks", callback_data="copy_trade_stop_all")],
-        [InlineKeyboardButton("← Back", callback_data="copy_trade_back"),
-         InlineKeyboardButton("↻ Refresh", callback_data="copy_trade_refresh")],
+        [InlineKeyboardButton("🗂️ All", callback_data="copy_trade_all"),
+         InlineKeyboardButton("🟢 Active", callback_data="copy_trade_active")],
+        [InlineKeyboardButton("➕ Add Subscription", callback_data="copy_trade_add_subscription")],
+        [InlineKeyboardButton("🏆 Discover", callback_data="copy_trade_discover")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")],
     ])
 
 def afk_mode_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("+ Create AFK Auto Trade", callback_data="afk_create")],
-        [InlineKeyboardButton("🔬 Run AFK BackTesting ↗", callback_data="afk_backtesting")],
-        [InlineKeyboardButton("← Back", callback_data="afk_back"),
-         InlineKeyboardButton("↻ Refresh", callback_data="afk_refresh")],
+        [InlineKeyboardButton("+ Create Strategy", callback_data="afk_create")],
+        [InlineKeyboardButton("✨ Ready to Run", callback_data="afk_backtesting")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="afk_main_menu")],
     ])
 
 def _afk_mode_text() -> str:
     return (
-        "AFK Auto Trade\n\n"
-        "AFK Auto Trade allows you to automate trades by setting conditions.\n\n"
-        "✅ Indicates a AFK Auto Trade setup is active.\n"
-        "❌ Indicates a AFK Auto Trade setup is paused.\n\n"
-        "You can create multiple instances of the same strategy; different strategies won't interfere with each other.\n\n"
-        "AFK Auto Trade Gitbook"
+        "🚀 Auto Trader\n\n"
+        "You don't have any strategies yet.\n\n"
+        "Start with Ready to Run for ready-made setups, or use Create Strategy to build your own."
     )
 
-def bridge_keyboard():
+def bridge_keyboard(bot_username: str | None = None):
+    add_button = InlineKeyboardButton("➕ Add to Group", callback_data="bridge_add")
+    if bot_username:
+        add_button = InlineKeyboardButton(
+            "➕ Add to Group",
+            url=f"https://t.me/{bot_username}?startgroup=true",
+        )
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("💸 Set Address", callback_data="bridge_set_address")],
-        [InlineKeyboardButton("❌ BSC",          callback_data="bridge_bsc"),
-         InlineKeyboardButton("❌ ETH",          callback_data="bridge_eth"),
-         InlineKeyboardButton("❌ BASE",         callback_data="bridge_base"),
-         InlineKeyboardButton("❌ HYPE",         callback_data="bridge_hype")],
-        [InlineKeyboardButton("✈️ Bridge",       callback_data="bridge_bridge")],
-        [InlineKeyboardButton("◀️ Back",         callback_data="bridge_back"),
-         InlineKeyboardButton("🔄 Refresh",      callback_data="bridge_refresh")],
-        [InlineKeyboardButton("🗑️ Close",        callback_data="bridge_close")],
+        [add_button],
+        [InlineKeyboardButton("◀️ Back", callback_data="bridge_back"),
+         InlineKeyboardButton("🔄 Refresh", callback_data="bridge_refresh")],
     ])
 
 def _bridge_text() -> str:
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S").replace("-", "\\-")
     return (
-        "🌸 *Bridge*\n\n"
-        "Balance: 0 SOL\n\n"
-        "Sender address: \\-\\-\n"
-        "Receiver address: \\-\\-\n\n"
-        f"🕐 *Last updated:* {ts}"
+        "👥 Add to Group\n\n"
+        "Add PolyBot to a Telegram group so multiple people can use it from the same chat.\n\n"
+        "Tap the button below to open Telegram's add-to-group flow."
     )
 
 def referral_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔗 Generate Link", callback_data="referral_generate")],
+        [InlineKeyboardButton("✏️ Edit Code", callback_data="referral_edit_code"),
+         InlineKeyboardButton("📷 Create QR", callback_data="referral_create_qr"),
+         InlineKeyboardButton("Claim", callback_data="referral_claim")],
         [InlineKeyboardButton("◀️ Back",                 callback_data="referral_back"),
          InlineKeyboardButton("🔄 Refresh",              callback_data="referral_refresh")],
         [InlineKeyboardButton("🗑️ Close",                callback_data="referral_close")],
@@ -633,6 +674,11 @@ def _withdraw_text() -> str:
 def settings_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("← Back", callback_data="settings_back")],
+        [InlineKeyboardButton("🚀 Trading", callback_data="settings_trading"),
+         InlineKeyboardButton("⚡ Presets", callback_data="settings_presets")],
+        [InlineKeyboardButton("🛡️ Security", callback_data="settings_security"),
+         InlineKeyboardButton("🎨 PnL Card", callback_data="settings_pnl_card")],
+        [InlineKeyboardButton("🌐 Language", callback_data="settings_language")],
         [InlineKeyboardButton("✅ Auto Redeem", callback_data="settings_auto_redeem")],
         [InlineKeyboardButton("Copy Mode: Mempool (Fast)", callback_data="settings_copy_mode")],
         [InlineKeyboardButton("❌ Manual Trade Confirm", callback_data="settings_manual_trade_confirm")],
@@ -648,23 +694,23 @@ def _settings_text() -> str:
 def presales_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⚙️ Config",    callback_data="presales_config")],
-        [InlineKeyboardButton("Add Presale",  callback_data="presales_add")],
-        [InlineKeyboardButton("◀️ Back",      callback_data="presales_back"),
+        [InlineKeyboardButton("Add Preset",   callback_data="presales_add")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="presales_back"),
          InlineKeyboardButton("🗑️ Close",     callback_data="presales_close")],
     ])
 
 def _presales_text() -> str:
     return (
-        "Add, remove, and manage presales\\!\n\n"
-        "ℹ️ ⚙️ *Config dictates the default settings of your presales\\. "
-        "You can further customize each presale individually\\.*"
+        "⚡ Presets\n\n"
+        "Add, remove, and manage trading presets.\n\n"
+        "Configure defaults once, then reuse them across workflows."
     )
 
 def _copy_trade_text() -> str:
     return (
-        "🚀 Copy Trade\n\n"
-        "Create and manage copy-trading tasks, sub-wallets, backtesting, alerts, and defaults.\n\n"
-        "No active copy trades yet."
+        "🤖 Copy Trading\n\n"
+        "You're not following any traders yet.\n\n"
+        "Tap Add Subscription to start copying a trader."
     )
 
 def limit_orders_keyboard():
@@ -676,13 +722,16 @@ def tpsl_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("Active", callback_data="tpsl_active"),
          InlineKeyboardButton("Closed", callback_data="tpsl_closed")],
+        [InlineKeyboardButton("➕ New Stop Loss", callback_data="tpsl_new_stop_loss")],
+        [InlineKeyboardButton("📜 Activity Logs", callback_data="tpsl_activity_logs")],
         [InlineKeyboardButton("Go to Portfolio", callback_data="tpsl_portfolio")],
+        [InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")],
     ])
 
 def _limit_orders_text() -> str:
     return (
-        "📝 Limit Orders\n\n"
-        "You have no active limit orders.\n\n"
+        "📋 Orders\n\n"
+        "You have no active orders.\n\n"
         "To place a limit buy order:\n"
         "1. Paste a Polymarket URL or search markets.\n"
         "2. Select 📝 Limit Yes or 📝 Limit No.\n"
@@ -696,35 +745,31 @@ def _limit_orders_text() -> str:
 
 def _tpsl_text() -> str:
     return (
-        "🛡️ TP/SL Orders\n\n"
-        "You have no active TP/SL orders."
+        "🛡️ Stop Loss Orders\n\n"
+        "You have no active stop loss orders.\n\n"
+        "Set up automatic sell triggers to limit downside on your positions."
     )
 
 def portfolio_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("← Back", callback_data="portfolio_back"),
-         InlineKeyboardButton("↻ Refresh", callback_data="portfolio_refresh")],
-        [InlineKeyboardButton("📄 PNL Report", callback_data="portfolio_pnl_report")],
-        [InlineKeyboardButton("🔹 Address ↗", callback_data="portfolio_address"),
-         InlineKeyboardButton("🔔 Signal", callback_data="portfolio_signal"),
-         InlineKeyboardButton("🟩 User", callback_data="portfolio_user")],
-        [InlineKeyboardButton("⇄ PNL", callback_data="portfolio_pnl"),
-         InlineKeyboardButton("🌐 Smart Money ↗", callback_data="portfolio_smart_money")],
-        [InlineKeyboardButton("🏆 World Cup Competition", callback_data="portfolio_competition")],
+        [InlineKeyboardButton("⬅️ Prev", callback_data="portfolio_prev"),
+         InlineKeyboardButton("Page 1/1", callback_data="portfolio_page"),
+         InlineKeyboardButton("Next ➡️", callback_data="portfolio_next")],
+        [InlineKeyboardButton("➤ 📁 All [0]", callback_data="portfolio_all"),
+         InlineKeyboardButton("🟢 Open [0]", callback_data="portfolio_open"),
+         InlineKeyboardButton("📖 History", callback_data="portfolio_history")],
+        [InlineKeyboardButton("↕️ Sort: Value", callback_data="portfolio_sort")],
+        [InlineKeyboardButton("📈 Limit Orders (0)", callback_data="portfolio_limit_orders"),
+         InlineKeyboardButton("🛡️ Stop Loss (0)", callback_data="portfolio_stop_loss")],
+        [InlineKeyboardButton("🔄 Refresh", callback_data="portfolio_refresh"),
+         InlineKeyboardButton("🏠 Main Menu", callback_data="portfolio_main_menu")],
     ])
 
 def _portfolio_text() -> str:
     return (
-        "🏛️ Manage your Positions(0) :\n\n"
-        "Total Balance: $0 - W1 ✏️\n"
-        "View Profile • AI Analysis • Polygonscan\n"
-        "Available Balance: $0\n"
-        "Positions Value: $0\n"
-        "Positions PNL: +$0 (0%)\n"
-        "Trade Comp • AI Wallet • Limit Order\n\n"
-        "No positions found.\n\n"
-        "PolyMarket's prices, total balances, and Redeem functions sometimes suffer from latency.\n"
-        "🌐 Web • AFK • COPY • Market • Smart Market"
+        "🗂️ All Positions\n\n"
+        "You have no open or resolved positions.\n\n"
+        "Paste a Polymarket link to start trading."
     )
 
 # ── Chains ────────────────────────────────────────────────────────────────────
@@ -769,6 +814,7 @@ MAIN_MENU_BUTTONS = {
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    await ensure_bot_username(ctx)
     user = update.effective_user
     if user:
         user_info = all_users.setdefault(user.id, {})
@@ -893,6 +939,7 @@ async def allusers(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query   = update.callback_query
     await query.answer()
+    await ensure_bot_username(ctx)
     uid     = query.from_user.id
     data    = query.data
     chat_id = query.message.chat_id
@@ -910,7 +957,6 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if data == "positions":
         await query.edit_message_text(
             _markets_text(ctx.user_data.get("market_category")),
-            parse_mode="Markdown",
             reply_markup=positions_keyboard(),
         )
         return
@@ -918,7 +964,6 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if data == "markets":
         await query.edit_message_text(
             _markets_text(ctx.user_data.get("market_category")),
-            parse_mode="Markdown",
             reply_markup=positions_keyboard(),
         )
         return
@@ -939,41 +984,43 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data in (
-        "portfolio_back",
-        "portfolio_refresh",
+        "portfolio_prev",
+        "portfolio_page",
+        "portfolio_next",
+        "portfolio_all",
+        "portfolio_open",
+        "portfolio_history",
+        "portfolio_sort",
+        "portfolio_limit_orders",
+        "portfolio_stop_loss",
+    ):
+        await query.edit_message_text(
+            _wallet_settings_text(),
+            parse_mode="MarkdownV2",
+            reply_markup=wallet_settings_keyboard(),
+        )
+        return
+
+    if data == "portfolio_refresh":
+        await query.edit_message_text(
+            _portfolio_text(),
+            reply_markup=portfolio_keyboard(),
+        )
+        return
+
+    if data in ("portfolio_back", "portfolio_main_menu", "portfolio_close"):
+        await _show_main_menu(query)
+        return
+
+    if data in (
         "portfolio_pnl_report",
         "portfolio_address",
         "portfolio_signal",
         "portfolio_user",
         "portfolio_pnl",
         "portfolio_smart_money",
-        "portfolio_competition",
         "portfolio_full",
-        "portfolio_open",
-        "portfolio_close",
-        "portfolio_main_menu",
     ):
-        if data in ("portfolio_back", "portfolio_main_menu"):
-            await query.edit_message_text(
-                _home_screen_text(),
-                reply_markup=main_menu_keyboard(),
-            )
-            return
-
-        if data == "portfolio_refresh":
-            await query.edit_message_text(
-                _portfolio_text(),
-                reply_markup=portfolio_keyboard(),
-            )
-            return
-
-        if data == "portfolio_user":
-            await query.edit_message_text(
-                _user_profile_text(),
-                reply_markup=recovery_keyboard(),
-            )
-            return
-
         await query.edit_message_text(
             _wallet_settings_text(),
             parse_mode="MarkdownV2",
@@ -984,7 +1031,6 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if data == "positions_refresh":
         await query.edit_message_text(
             _markets_text(ctx.user_data.get("market_category")),
-            parse_mode="Markdown",
             reply_markup=positions_keyboard(),
         )
         return
@@ -995,10 +1041,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "positions_homepage":
         ctx.user_data.pop("market_category", None)
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     # ── Wallet settings screen (from positions buttons) ───────────────────────
@@ -1020,10 +1063,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "wallets_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     if data == "wallets_delete":
@@ -1039,7 +1079,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "wallets_close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── LP Sniper screen ──────────────────────────────────────────────────────
@@ -1068,14 +1108,11 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "lp_sniper_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     if data == "lp_sniper_close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── Copy Trade screen ─────────────────────────────────────────────────────
@@ -1103,6 +1140,10 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "copy_trade_add",
         "copy_trade_activity",
         "copy_trade_pause",
+        "copy_trade_all",
+        "copy_trade_active",
+        "copy_trade_add_subscription",
+        "copy_trade_discover",
     ):
         await query.edit_message_text(
             _wallet_settings_text(),
@@ -1112,14 +1153,11 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "copy_trade_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     if data == "copy_trade_close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── Wallets screen ────────────────────────────────────────────────────────
@@ -1162,22 +1200,18 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data == "afk_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+    if data in ("afk_back", "afk_main_menu"):
+        await _show_main_menu(query)
         return
 
     if data == "afk_close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── Presales screen ───────────────────────────────────────────────────────
     if data == "presales":
         await query.edit_message_text(
             _presales_text(),
-            parse_mode="MarkdownV2",
             reply_markup=presales_keyboard(),
         )
         return
@@ -1191,14 +1225,11 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "presales_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     if data == "presales_close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── Settings screen ───────────────────────────────────────────────────────
@@ -1214,6 +1245,10 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "settings_copy_mode",
         "settings_manual_trade_confirm",
         "settings_buy_sell_setting",
+        "settings_trading",
+        "settings_presets",
+        "settings_security",
+        "settings_pnl_card",
         "settings_trade_mode_header",
         "settings_trade_mode_cautious", "settings_trade_mode_standard",
         "settings_trade_mode_expert", "settings_trade_threshold_header",
@@ -1231,14 +1266,18 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "settings_back":
+        await _show_main_menu(query)
+        return
+
+    if data == "settings_language":
         await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
+            LANGUAGE_MENU_TEXT,
+            reply_markup=language_keyboard(),
         )
         return
 
     if data == "settings_close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── Withdraw screen ───────────────────────────────────────────────────────
@@ -1267,14 +1306,11 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "withdraw_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     if data == "withdraw_close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── Referral screen ───────────────────────────────────────────────────────
@@ -1294,7 +1330,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data in ("referral_generate", "referral_change"):
+    if data in ("referral_generate", "referral_change", "referral_edit_code", "referral_create_qr", "referral_claim"):
         await query.edit_message_text(
             _wallet_settings_text(),
             parse_mode="MarkdownV2",
@@ -1303,14 +1339,11 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "referral_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     if data == "referral_close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── Competition screen ───────────────────────────────────────────────────
@@ -1331,57 +1364,43 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "competition_close":
-        language = ctx.user_data.get("language", "en")
-        await query.edit_message_text(
-            _wallet_settings_text(),
-            parse_mode="MarkdownV2",
-            reply_markup=wallet_settings_keyboard(language),
-        )
+        await _show_main_menu(query)
         return
 
     # ── Bridge screen ─────────────────────────────────────────────────────────
     if data == "bridge":
         await query.edit_message_text(
-            _wallet_settings_text(),
-            parse_mode="MarkdownV2",
-            reply_markup=wallet_settings_keyboard(),
+            _bridge_text(),
+            reply_markup=bridge_keyboard(BOT_USERNAME),
         )
         return
 
     if data == "bridge_refresh":
         await query.edit_message_text(
             _bridge_text(),
-            parse_mode="MarkdownV2",
-            reply_markup=bridge_keyboard(),
+            reply_markup=bridge_keyboard(BOT_USERNAME),
         )
         return
 
     if data in ("bridge_set_address", "bridge_bsc", "bridge_eth",
                 "bridge_base", "bridge_hype", "bridge_bridge"):
         await query.edit_message_text(
-            _wallet_settings_text(),
-            parse_mode="MarkdownV2",
-            reply_markup=wallet_settings_keyboard(),
+            _bridge_text(),
+            reply_markup=bridge_keyboard(BOT_USERNAME),
         )
         return
 
     if data == "bridge_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     if data == "bridge_close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── Refresh main menu ─────────────────────────────────────────────────────
     if data == "refresh":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     # ── Recovery screen ───────────────────────────────────────────────────────
@@ -1410,10 +1429,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "chains_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     if data == "help":
@@ -1425,17 +1441,40 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "quick_start":
         await query.edit_message_text(
+            _alerts_text(),
+            reply_markup=alerts_keyboard(),
+        )
+        return
+
+    if data in (
+        "alerts_prev",
+        "alerts_page",
+        "alerts_next",
+        "alerts_add_market",
+        "alerts_add_wallet",
+    ):
+        await query.edit_message_text(
             _wallet_settings_text(),
             parse_mode="MarkdownV2",
             reply_markup=wallet_settings_keyboard(),
         )
         return
 
-    if data in ("help_recovery", "help_create_ticket"):
+    if data == "alerts_main_menu":
+        await _show_main_menu(query)
+        return
+
+    if data == "help_recovery":
         await query.edit_message_text(
-            _wallet_settings_text(),
-            parse_mode="MarkdownV2",
-            reply_markup=wallet_settings_keyboard(),
+            _recovery_text(),
+            reply_markup=recovery_keyboard(),
+        )
+        return
+
+    if data == "help_create_ticket":
+        await query.edit_message_text(
+            "📝 Create Ticket\n\nTicket creation is not available yet.",
+            reply_markup=back_to_menu_keyboard(),
         )
         return
 
@@ -1447,10 +1486,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "language_back":
-        await query.edit_message_text(
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
     if data in LANGUAGE_SELECTIONS:
@@ -1489,7 +1525,7 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if data in ("tpsl_active", "tpsl_closed", "tpsl_portfolio"):
+    if data in ("tpsl_active", "tpsl_closed", "tpsl_new_stop_loss", "tpsl_activity_logs"):
         await query.edit_message_text(
             _wallet_settings_text(),
             parse_mode="MarkdownV2",
@@ -1497,12 +1533,18 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if data == "tpsl_portfolio":
+        await query.edit_message_text(
+            _portfolio_text(),
+            reply_markup=portfolio_keyboard(),
+        )
+        return
+
     # ── Limit Orders screen ───────────────────────────────────────────────────
     if data == "limit_orders":
         await query.edit_message_text(
-            _wallet_settings_text(),
-            parse_mode="MarkdownV2",
-            reply_markup=wallet_settings_keyboard(),
+            _limit_orders_text(),
+            reply_markup=limit_orders_keyboard(),
         )
         return
 
@@ -1541,16 +1583,12 @@ async def button_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # ── Back to menu ──────────────────────────────────────────────────────────
     if data == "back_to_menu":
-        await ctx.bot.send_message(
-            chat_id,
-            _home_screen_text(),
-            reply_markup=main_menu_keyboard(),
-        )
+        await _show_main_menu(query)
         return
 
-    # ── Close — delete just the menu message ──────────────────────────────────
+    # ── Close — return to the main menu ───────────────────────────────────────
     if data == "close":
-        await query.message.delete()
+        await _show_main_menu(query)
         return
 
     # ── Swap confirmations ────────────────────────────────────────────────────
@@ -1565,6 +1603,7 @@ async def message_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     raw_text = update.message.text or ""
     text     = raw_text.strip()
     awaiting = ctx.user_data.get("awaiting")
+    await ensure_bot_username(ctx)
 
     user = update.effective_user
     all_users[user.id] = {
@@ -1697,6 +1736,7 @@ async def confirm_swap(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query   = update.callback_query
     uid     = query.from_user.id
     chat_id = query.message.chat_id
+    await ensure_bot_username(ctx)
     kp      = get_keypair(uid)
     entry   = user_wallets.get(uid)
 
